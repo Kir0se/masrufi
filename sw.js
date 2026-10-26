@@ -21,7 +21,7 @@ self.addEventListener('fetch', e => {
     caches.open(CACHE).then(async cache => {
       // ignore ?add and similar so every variant hits the same cached page
       const cached = await cache.match(e.request, { ignoreSearch: true });
-      const fresh = fetch(e.request)
+      const fresh = fetch(e.request, { cache: 'no-cache' })
         .then(res => {
           if (res.ok) cache.put(e.request.url.split('?')[0], res.clone());
           return res;
