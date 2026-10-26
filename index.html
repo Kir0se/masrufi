@@ -475,6 +475,10 @@ $('importFile').onchange = async e => {
 if (!state.budget && !state.txs.length) setTimeout(openSheet, 300);
 if (new URLSearchParams(location.search).has('add')) $('amount').focus();
 render();
+
+if ('serviceWorker' in navigator && location.protocol === 'https:') {
+  navigator.serviceWorker.register('sw.js').catch(() => {});
+}
 </script>
 </body>
 </html>
