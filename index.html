@@ -176,6 +176,31 @@
            padding: 14px 16px; border-radius: 14px; color: #fff; font-weight: 600; font-size: 15px; z-index: 20;
            transform: translateY(-150%); transition: transform .3s ease; box-shadow: 0 8px 30px rgba(0,0,0,.2); }
   .toast.show { transform: none; }
+  .toast { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+  .toast button { border: 0; background: rgba(255,255,255,.25); color: #fff; font-weight: 700; padding: 6px 12px; border-radius: 10px; cursor: pointer; flex: none; }
+
+  .tx { cursor: pointer; }
+
+  /* comparison chart */
+  .chart { display: flex; align-items: flex-end; gap: 8px; height: 130px; margin: 6px 0 4px; }
+  .chart .col { flex: 1; height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; gap: 4px; font-size: 11px; color: var(--muted); cursor: pointer; }
+  .chart .b { width: 100%; max-width: 34px; background: var(--chip); border-radius: 6px 6px 2px 2px; min-height: 2px; }
+  .chart .col.cur .b { background: var(--accent); }
+  .chart .col.cur { color: var(--text); font-weight: 700; }
+  .cmp { display: flex; justify-content: space-between; gap: 8px; padding: 8px 0; border-top: 1px solid var(--line); font-size: 14px; }
+  .cmp:first-child { border-top: 0; }
+  .up { color: var(--bad); font-weight: 600; } .down { color: var(--ok); font-weight: 600; } .same { color: var(--muted); }
+
+  /* goals */
+  .g-nums { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; margin-bottom: 8px; }
+  .g-nums b { font-size: 24px; }
+  .g-nums span { color: var(--muted); font-size: 14px; }
+  .track.big { height: 12px; background: var(--chip); border-radius: 99px; overflow: hidden; }
+  .track.big .fill { height: 100%; background: var(--accent); border-radius: 99px; transition: width .4s ease; }
+  .goal.done .track.big .fill { background: var(--ok); }
+  .g-info { font-size: 13px; color: var(--muted); margin-top: 10px; display: grid; gap: 4px; }
+  .g-add { display: grid; grid-template-columns: 1fr auto auto; gap: 8px; margin-top: 12px; }
+  .g-add input { border: 0; background: var(--chip); border-radius: 12px; padding: 12px; outline: none; font-size: 16px; min-width: 0; }
   .toast.ok { background: var(--ok); } .toast.warn { background: var(--warn); } .toast.bad { background: var(--bad); }
 </style>
 </head>
@@ -293,6 +318,13 @@
     </div>
   </section>
 
+  <section class="card" id="cmpCard" hidden>
+    <div class="card-head"><h3>📈 مقارنة بالشهر الماضي</h3></div>
+    <div class="chart" id="chart"></div>
+    <div class="hint" style="text-align:center;margin:0 0 10px">مجموع المصاريف لآخر 6 أشهر</div>
+    <div id="cmpList"></div>
+  </section>
+
   <section class="card" id="histCard" hidden>
     <div class="card-head"><h3>📊 الأشهر السابقة</h3></div>
     <div id="histList"></div>
@@ -300,9 +332,22 @@
   </section>
 </main>
 
+<!-- ============ GOALS TAB ============ -->
+<main id="tabGoals" hidden>
+  <section class="card" id="goalsSum" hidden>
+    <div class="figures">
+      <div class="label">مجموع اللي حطيته بالأهداف</div>
+      <div class="big num" id="goalsTotal" style="margin-bottom:0">0</div>
+    </div>
+  </section>
+  <div id="goalList"></div>
+  <button class="btn primary" id="addGoal" style="width:100%">+ هدف جديد</button>
+</main>
+
 <nav class="tabbar">
   <button data-tab="pocket"><span>💵</span>المصروف</button>
   <button data-tab="month"><span>📅</span>الشهري</button>
+  <button data-tab="goals"><span>🎯</span>الأهداف</button>
 </nav>
 
 <div class="sheet-bg" id="sheetBg"></div>
@@ -383,6 +428,56 @@
   <button class="btn soft" data-close>إلغاء</button>
 </div>
 
+<!-- transaction editor -->
+<div class="sheet" id="txSheet">
+  <h3 id="txTitle">تعديل</h3>
+  <div class="field">
+    <label>المبلغ</label>
+    <input id="txAmt" inputmode="decimal">
+  </div>
+  <div class="field" id="txCatField">
+    <label>التصنيف</label>
+    <div class="chips" id="txCats" style="margin-top:0"></div>
+    <input id="txLabel" class="note" placeholder="اكتب على شو صرفت" maxlength="30" hidden>
+  </div>
+  <div class="field">
+    <label>ملاحظة</label>
+    <input id="txNote" maxlength="80" placeholder="اختياري">
+  </div>
+  <div class="field">
+    <label>التاريخ والوقت</label>
+    <input id="txWhen" type="datetime-local">
+  </div>
+  <button class="btn primary" id="saveTx">حفظ</button>
+  <button class="btn danger" id="delTx">حذف</button>
+  <button class="btn soft" data-close>إلغاء</button>
+</div>
+
+<!-- goal editor -->
+<div class="sheet" id="goalSheet">
+  <h3 id="goalTitle">هدف جديد</h3>
+  <div class="field">
+    <label>شو بدك تجمع له؟</label>
+    <input id="goalName" placeholder="مثلاً: موبايل جديد، سفرة" maxlength="30">
+  </div>
+  <div class="field">
+    <label>المبلغ المطلوب</label>
+    <input id="goalTarget" inputmode="decimal" placeholder="0">
+  </div>
+  <div class="field">
+    <label>الأيقونة</label>
+    <div class="emos" id="goalEmos"></div>
+  </div>
+  <div class="field">
+    <label>بدك توصل له قبل (اختياري)</label>
+    <input id="goalDeadline" type="date">
+    <small>إذا حددته، بيحسب لك قديش لازم تحط كل شهر.</small>
+  </div>
+  <button class="btn primary" id="saveGoal">حفظ</button>
+  <button class="btn danger" id="deleteGoal" hidden>حذف الهدف</button>
+  <button class="btn soft" data-close>إلغاء</button>
+</div>
+
 <div class="toast" id="toast"></div>
 
 <script>
@@ -399,6 +494,7 @@ const CATS = [
   { id: 'custom', emo: '✏️', name: 'غير ذلك' },
 ];
 const SUB_EMOS = ['🎬', '🎵', '📱', '🌐', '☁️', '🎮', '💪', '🤖', '📰', '🚗', '🏠', '📦'];
+const GOAL_EMOS = ['🎯', '📱', '💻', '✈️', '🚗', '🏠', '🎓', '💍', '🎁', '🛡️', '⌚', '💰'];
 const BIG_EXPENSE = 0.20;   // single expense above 20% of the total is "big"
 const LOW = 0.25, CRITICAL = 0.10;
 const SUBS_HEAVY = 0.30;    // subscriptions above 30% of salary get flagged
@@ -412,7 +508,7 @@ let viewYM = ymOf(new Date());
 
 function defaults() {
   return { budget: 0, currency: 'ليرة', endDate: '', start: Date.now(), txs: [],
-           subs: [], months: {}, saveGoal: 0, linkPocket: false };
+           subs: [], months: {}, saveGoal: 0, linkPocket: false, goals: [] };
 }
 function load() {
   try {
@@ -653,13 +749,182 @@ function renderMonth() {
   if (m.hasSalary && m.salary > 0 && m.subsTotal / m.salary > SUBS_HEAVY)
     alerts.push('💸 الاشتراكات لحالها ' + Math.round(m.subsTotal / m.salary * 100) + '% من راتبك. شوف إذا في شي ما بتستعمله.');
   if (m.goal > 0 && m.hasSalary && m.remaining >= m.goal) alerts.push('🎯 حققت هدف الادخار (' + state.saveGoal + '%)');
+  const toGoals = goalDepositsIn(viewYM);
+  if (toGoals > 0) alerts.push('🐷 حطيت ' + money(toGoals) + ' بأهدافك هالشهر');
   $('mAlerts').innerHTML = alerts.map(a => '<div>' + a + '</div>').join('');
 
   renderSalary(m);
   renderSubs(m, nowYM);
   renderItems(m);
+  renderCompare();
   renderHistory(nowYM);
 }
+
+/* ---------- month comparison ---------- */
+function pocketByCat(ym) {
+  const out = {};
+  for (const t of state.txs) if (t.type !== 'inc' && monthOfTs(t.ts) === ym) out[t.cat] = (out[t.cat] || 0) + t.amt;
+  return out;
+}
+// everything that went out in a month: subscriptions, one-off costs and pocket spending
+function allOut(ym) {
+  const m = monthTotals(ym);
+  return m.subsTotal + m.itemsTotal + Object.values(pocketByCat(ym)).reduce((a, v) => a + v, 0);
+}
+function deltaHtml(cur, prev) {
+  if (!prev) return cur ? '<span class="same">جديد</span>' : '<span class="same">—</span>';
+  const d = Math.round((cur - prev) / prev * 100);
+  if (d === 0) return '<span class="same">نفس الشي</span>';
+  return d > 0 ? '<span class="up">↑ ' + d + '%</span>' : '<span class="down">↓ ' + (-d) + '%</span>';
+}
+function renderCompare() {
+  const months = Array.from({ length: 6 }, (_, i) => ymShift(viewYM, i - 5));
+  const vals = months.map(allOut);
+  const withData = vals.filter(v => v > 0).length;
+  $('cmpCard').hidden = withData < 1;
+  if (!withData) return;
+  const max = Math.max(...vals);
+  $('chart').innerHTML = months.map((ym, i) => {
+    const [y, mo] = ym.split('-').map(Number);
+    const name = new Date(y, mo - 1, 1).toLocaleDateString(LOC, { month: 'short' });
+    return '<div class="col ' + (ym === viewYM ? 'cur' : '') + '" data-ym="' + ym + '" title="' + money(vals[i]) + '">'
+      + '<span class="num">' + (vals[i] ? fmt(Math.round(vals[i])) : '') + '</span>'
+      + '<div class="b" style="height:' + (max ? vals[i] / max * 80 : 0) + '%"></div><span>' + name + '</span></div>';
+  }).join('');
+
+  const prevYM = ymShift(viewYM, -1);
+  const cur = vals[5], prev = vals[4];
+  const rows = ['<div class="cmp"><b>كل المصاريف</b><span><span class="num">' + money(cur) + '</span> ' + deltaHtml(cur, prev) + '</span></div>'];
+  const a = monthTotals(viewYM), b = monthTotals(prevYM);
+  rows.push('<div class="cmp"><span>🔁 الاشتراكات</span><span><span class="num">' + money(a.subsTotal) + '</span> ' + deltaHtml(a.subsTotal, b.subsTotal) + '</span></div>');
+  if (a.itemsTotal || b.itemsTotal)
+    rows.push('<div class="cmp"><span>🧾 مصاريف ثانية</span><span><span class="num">' + money(a.itemsTotal) + '</span> ' + deltaHtml(a.itemsTotal, b.itemsTotal) + '</span></div>');
+  const pc = pocketByCat(viewYM), pp = pocketByCat(prevYM);
+  const cats = [...new Set([...Object.keys(pc), ...Object.keys(pp)])].sort((x, y) => (pc[y] || 0) - (pc[x] || 0));
+  for (const id of cats) {
+    const c = CATS.find(x => x.id === id) || CATS[CATS.length - 1];
+    rows.push('<div class="cmp"><span>' + c.emo + ' ' + c.name + '</span><span><span class="num">' + money(pc[id] || 0) + '</span> ' + deltaHtml(pc[id] || 0, pp[id] || 0) + '</span></div>');
+  }
+  // one plain-language takeaway: the category that grew the most
+  const grew = cats.map(id => ({ id, d: (pc[id] || 0) - (pp[id] || 0) })).filter(x => x.d > 0 && pp[x.id]).sort((x, y) => y.d - x.d)[0];
+  if (grew) {
+    const c = CATS.find(x => x.id === grew.id) || CATS[CATS.length - 1];
+    rows.push('<div class="hint">💡 أكثر شي زاد: ' + c.name + ' (+' + money(grew.d) + ' عن ' + ymName(prevYM) + ')</div>');
+  }
+  $('cmpList').innerHTML = rows.join('');
+}
+$('chart').addEventListener('click', e => {
+  const c = e.target.closest('.col');
+  if (c) { viewYM = c.dataset.ym; editingSalary = false; renderMonth(); window.scrollTo(0, 0); }
+});
+
+/* ---------- goals ---------- */
+const goalSaved = g => g.deposits.reduce((a, d) => a + d.amt, 0);
+function goalDepositsIn(ym) {
+  let s = 0;
+  for (const g of state.goals) for (const d of g.deposits) if (monthOfTs(d.ts) === ym) s += d.amt;
+  return s;
+}
+function monthsBetween(a, b) { return (b.getFullYear() - a.getFullYear()) * 12 + b.getMonth() - a.getMonth(); }
+
+function goalInfo(g) {
+  const saved = goalSaved(g);
+  const left = Math.max(0, g.target - saved);
+  const lines = [];
+  if (left === 0) return { saved, left, lines: ['🎉 وصلت لهدفك! مبروك'] };
+  lines.push('باقي ' + money(left));
+  const now = new Date();
+  if (g.deadline) {
+    const end = new Date(g.deadline + 'T00:00');
+    const monthsLeft = monthsBetween(now, end) + 1;
+    if (end < startOfDay(now)) lines.push('⏰ انتهى الموعد وباقي ' + money(left));
+    else lines.push('📅 لتوصل قبل ' + end.toLocaleDateString(LOC, { day: 'numeric', month: 'long', year: 'numeric' })
+      + ' لازم تحط ' + money(left / monthsLeft) + (monthsLeft > 1 ? ' بالشهر' : ' هالشهر'));
+  }
+  // pace so far: what was put in per month since the goal was created
+  const months = Math.max(1, (Date.now() - g.created) / (30 * 86400000));
+  const rate = saved / months;
+  if (saved > 0 && Date.now() - g.created > 7 * 86400000 && rate > 0) {
+    const eta = new Date(now.getFullYear(), now.getMonth() + Math.ceil(left / rate), 1);
+    lines.push('🐢 على معدلك (' + money(rate) + ' بالشهر) بتوصل تقريباً ب' + eta.toLocaleDateString(LOC, { month: 'long', year: 'numeric' }));
+  }
+  return { saved, left, lines };
+}
+
+function renderGoals() {
+  const total = state.goals.reduce((a, g) => a + goalSaved(g), 0);
+  $('goalsSum').hidden = !state.goals.length;
+  $('goalsTotal').textContent = money(total);
+  if (!state.goals.length) {
+    $('goalList').innerHTML = '<section class="card"><div class="empty">🎯 حط هدف تجمع له، مثل موبايل جديد أو سفرة، وتابع قديش قرّبت.</div></section>';
+    return;
+  }
+  $('goalList').innerHTML = state.goals.map(g => {
+    const { saved, left, lines } = goalInfo(g);
+    const pct = g.target > 0 ? Math.min(100, saved / g.target * 100) : 0;
+    return '<section class="card goal ' + (left === 0 ? 'done' : '') + '" data-g="' + g.id + '">'
+      + '<div class="card-head"><h3>' + g.emo + ' ' + esc(g.name) + '</h3><button class="link-btn" data-edit="' + g.id + '">تعديل</button></div>'
+      + '<div class="g-nums"><b class="num">' + money(saved) + '</b><span>من <span class="num">' + money(g.target) + '</span> · <span class="num">' + Math.round(pct) + '%</span></span></div>'
+      + '<div class="track big"><div class="fill" style="width:' + pct + '%"></div></div>'
+      + '<div class="g-info">' + lines.map(l => '<div>' + l + '</div>').join('') + '</div>'
+      + '<div class="g-add"><input inputmode="decimal" placeholder="المبلغ" data-amt="' + g.id + '">'
+      + '<button class="btn primary small" data-dep="' + g.id + '">+ حط</button>'
+      + '<button class="btn soft small" data-wd="' + g.id + '">− سحب</button></div>'
+      + '</section>';
+  }).join('');
+}
+
+$('goalList').addEventListener('click', e => {
+  const ed = e.target.closest('[data-edit]');
+  if (ed) return openGoal(state.goals.find(g => g.id === ed.dataset.edit));
+  const b = e.target.closest('[data-dep],[data-wd]');
+  if (!b) return;
+  const id = b.dataset.dep || b.dataset.wd;
+  const g = state.goals.find(x => x.id === id);
+  const input = document.querySelector('[data-amt="' + id + '"]');
+  const amt = parseNum(input.value);
+  if (!(amt > 0)) { toast('اكتب المبلغ', 'warn'); input.focus(); return; }
+  const isWd = !!b.dataset.wd;
+  if (isWd && amt > goalSaved(g)) return toast('ما في هالقد بالهدف', 'warn');
+  const wasDone = goalSaved(g) >= g.target;
+  g.deposits.push({ id: uid(), amt: isWd ? -amt : amt, ts: Date.now() });
+  save(); renderGoals();
+  if (!isWd && !wasDone && goalSaved(g) >= g.target) toast('🎉 مبروك! وصلت لهدف ' + g.name);
+  else toast(isWd ? 'سحبت ' + money(amt) + ' من ' + g.name : 'حطيت ' + money(amt) + ' ب' + g.name + ' 🐷');
+});
+
+let editGoal = null, goalEmo = GOAL_EMOS[0];
+$('goalEmos').innerHTML = GOAL_EMOS.map(e => '<button data-e="' + e + '">' + e + '</button>').join('');
+function paintGoalEmos() { document.querySelectorAll('#goalEmos button').forEach(b => b.classList.toggle('on', b.dataset.e === goalEmo)); }
+$('goalEmos').addEventListener('click', e => { const b = e.target.closest('button'); if (b) { goalEmo = b.dataset.e; paintGoalEmos(); } });
+function openGoal(g) {
+  editGoal = g || null;
+  $('goalTitle').textContent = g ? 'تعديل الهدف' : 'هدف جديد';
+  $('goalName').value = g ? g.name : '';
+  $('goalTarget').value = g ? g.target : '';
+  $('goalDeadline').value = g ? g.deadline || '' : '';
+  goalEmo = g ? g.emo : GOAL_EMOS[0];
+  $('deleteGoal').hidden = !g;
+  paintGoalEmos();
+  openSheet($('goalSheet'));
+}
+$('addGoal').onclick = () => openGoal(null);
+$('saveGoal').onclick = () => {
+  const name = $('goalName').value.trim();
+  const target = parseNum($('goalTarget').value);
+  if (!name) return toast('اكتب اسم الهدف', 'warn');
+  if (!(target > 0)) return toast('اكتب المبلغ المطلوب', 'warn');
+  const data = { name, target, emo: goalEmo, deadline: $('goalDeadline').value };
+  if (editGoal) Object.assign(editGoal, data);
+  else state.goals.push(Object.assign({ id: uid(), created: Date.now(), deposits: [] }, data));
+  save(); closeSheet(); renderGoals();
+  toast(editGoal ? 'تم التعديل ✓' : 'يلا نبلش نجمع لـ ' + name + ' 🎯');
+};
+$('deleteGoal').onclick = () => {
+  const g = editGoal;
+  closeSheet();
+  withUndo('انحذف هدف ' + g.name, () => { state.goals = state.goals.filter(x => x.id !== g.id); });
+};
 
 let editingSalary = false;
 function renderSalary(m) {
@@ -742,11 +1007,13 @@ function renderHistory(nowYM) {
 
 /* ---------- general ---------- */
 function render() {
-  $('title').textContent = tab === 'pocket' ? 'مصروفي' : 'الشهري';
+  if (!['pocket', 'month', 'goals'].includes(tab)) tab = 'pocket';
+  $('title').textContent = { pocket: 'مصروفي', month: 'الشهري', goals: 'الأهداف' }[tab];
   $('tabPocket').hidden = tab !== 'pocket';
   $('tabMonth').hidden = tab !== 'month';
+  $('tabGoals').hidden = tab !== 'goals';
   document.querySelectorAll('.tabbar button').forEach(b => b.classList.toggle('on', b.dataset.tab === tab));
-  if (tab === 'pocket') renderPocket(); else renderMonth();
+  if (tab === 'pocket') renderPocket(); else if (tab === 'month') renderMonth(); else renderGoals();
 }
 function setTab(t) {
   tab = t;
@@ -760,13 +1027,31 @@ document.querySelector('.tabbar').addEventListener('click', e => {
 });
 
 let toastTimer;
-function toast(msg, level = 'ok') {
+function toast(msg, level = 'ok', action) {
   const el = $('toast');
   el.className = 'toast ' + level;
-  el.textContent = msg;
+  el.innerHTML = '<span>' + esc(msg) + '</span>';
+  if (action) {
+    const b = document.createElement('button');
+    b.textContent = action.label;
+    b.onclick = () => { el.classList.remove('show'); action.fn(); };
+    el.appendChild(b);
+  }
   requestAnimationFrame(() => el.classList.add('show'));
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => el.classList.remove('show'), level === 'ok' ? 1800 : 3500);
+  toastTimer = setTimeout(() => el.classList.remove('show'), action ? 5000 : level === 'ok' ? 1800 : 3500);
+}
+
+// run a destructive change and offer to undo it for a few seconds
+function withUndo(msg, mutate) {
+  const snap = JSON.stringify(state);
+  mutate();
+  save(); render();
+  toast(msg, 'ok', { label: 'تراجع ↩', fn: () => {
+    state = Object.assign(defaults(), JSON.parse(snap));
+    save(); render();
+    toast('رجّعناه ✓');
+  } });
 }
 
 let openSheetEl = null;
@@ -774,7 +1059,7 @@ function openSheet(el) {
   document.querySelectorAll('.sheet.open').forEach(s => s.classList.remove('open'));
   openSheetEl = el;
   $('sheetBg').style.display = 'block';
-  requestAnimationFrame(() => el.classList.add('open'));
+  requestAnimationFrame(() => { if (openSheetEl === el) el.classList.add('open'); });
 }
 function closeSheet() {
   if (!openSheetEl) return;
@@ -824,15 +1109,54 @@ $('addExp').onclick = () => add('exp');
 $('addInc').onclick = () => add('inc');
 ['amount', 'note', 'customCat'].forEach(id => $(id).addEventListener('keydown', e => { if (e.key === 'Enter') add('exp'); }));
 
+function deleteTx(t) {
+  withUndo('انحذف "' + (t.label || t.note || fmt(t.amt)) + '"', () => { state.txs = state.txs.filter(x => x.id !== t.id); });
+}
 $('list').addEventListener('click', e => {
-  const b = e.target.closest('.del');
-  if (!b) return;
-  const t = state.txs.find(x => x.id === b.dataset.id);
-  if (t && confirm('حذف "' + (t.label || t.note || fmt(t.amt)) + '"؟')) {
-    state.txs = state.txs.filter(x => x.id !== t.id);
-    save(); render();
-  }
+  const del = e.target.closest('.del');
+  if (del) { const t = state.txs.find(x => x.id === del.dataset.id); if (t) deleteTx(t); return; }
+  const row = e.target.closest('.tx');
+  if (row) openTx(state.txs.find(x => x.id === row.querySelector('.del').dataset.id));
 });
+
+/* ---------- transaction editor ---------- */
+let editTx = null, txCat = 'food';
+$('txCats').innerHTML = CATS.map(c => '<button class="chip" data-cat="' + c.id + '">' + c.emo + ' ' + c.name + '</button>').join('');
+function paintTxCats() {
+  document.querySelectorAll('#txCats .chip').forEach(b => b.classList.toggle('on', b.dataset.cat === txCat));
+  $('txLabel').hidden = txCat !== 'custom';
+}
+$('txCats').addEventListener('click', e => { const b = e.target.closest('.chip'); if (b) { txCat = b.dataset.cat; paintTxCats(); } });
+const toLocalInput = ts => new Date(ts - new Date(ts).getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+
+function openTx(t) {
+  if (!t) return;
+  editTx = t;
+  const isInc = t.type === 'inc';
+  $('txTitle').textContent = isInc ? 'تعديل الرصيد' : 'تعديل المصروف';
+  $('txAmt').value = t.amt;
+  $('txCatField').hidden = isInc;
+  txCat = t.cat || 'food';
+  $('txLabel').value = t.label || '';
+  $('txNote').value = t.note || '';
+  $('txWhen').value = toLocalInput(t.ts);
+  paintTxCats();
+  openSheet($('txSheet'));
+}
+$('saveTx').onclick = () => {
+  const amt = parseNum($('txAmt').value);
+  if (!(amt > 0)) return toast('اكتب المبلغ', 'warn');
+  const label = txCat === 'custom' ? $('txLabel').value.trim() : '';
+  if (editTx.type !== 'inc' && txCat === 'custom' && !label) return toast('اكتب على شو صرفت', 'warn');
+  const when = new Date($('txWhen').value).getTime();
+  editTx.amt = amt;
+  editTx.note = $('txNote').value.trim();
+  if (editTx.type !== 'inc') { editTx.cat = txCat; editTx.label = label; }
+  if (isFinite(when)) editTx.ts = when;
+  save(); closeSheet(); render();
+  toast('تم التعديل ✓');
+};
+$('delTx').onclick = () => { const t = editTx; closeSheet(); deleteTx(t); };
 $('dueBanner').onclick = () => { viewYM = ymOf(new Date()); setTab('month'); };
 
 /* ---------- monthly actions ---------- */
@@ -880,10 +1204,7 @@ $('itemList').addEventListener('click', e => {
   if (!b) return;
   const md = ensureMonth(viewYM);
   const it = md.items.find(i => i.id === b.dataset.item);
-  if (it && confirm('حذف "' + it.name + '"؟')) {
-    md.items = md.items.filter(i => i.id !== it.id);
-    save(); renderMonth();
-  }
+  if (it) withUndo('انحذف "' + it.name + '"', () => { md.items = md.items.filter(i => i.id !== it.id); });
 });
 $('histList').addEventListener('click', e => {
   const r = e.target.closest('.hist');
@@ -944,9 +1265,12 @@ $('toggleSub').onclick = () => {
 };
 $('deleteSub').onclick = () => {
   if (!editSub || !confirm('حذف "' + editSub.name + '" نهائياً؟ بينشال من كل الأشهر، حتى السابقة. إذا بس بطّلت تدفعه استعمل "إيقاف".')) return;
-  state.subs = state.subs.filter(s => s !== editSub);
-  for (const k in state.months) delete state.months[k].paid[editSub.id];
-  save(); closeSheet(); renderMonth();
+  const s = editSub;
+  closeSheet();
+  withUndo('انحذف ' + s.name, () => {
+    state.subs = state.subs.filter(x => x.id !== s.id);
+    for (const k in state.months) delete state.months[k].paid[s.id];
+  });
 };
 
 /* ---------- settings ---------- */
