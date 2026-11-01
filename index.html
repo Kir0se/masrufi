@@ -215,6 +215,12 @@
 <main id="tabPocket">
   <button class="banner" id="dueBanner" hidden></button>
 
+  <div class="month-nav">
+    <button id="pPrev" aria-label="الشهر السابق">›</button>
+    <b id="pMonthLabel"></b>
+    <button id="pNext" aria-label="الشهر التالي">‹</button>
+  </div>
+
   <section class="card">
     <div class="summary">
       <div class="ring">
@@ -225,10 +231,9 @@
         <div class="pct"><div><span id="pct" class="num">100%</span><small>متبقي</small></div></div>
       </div>
       <div class="figures">
-        <div class="label">المتبقي معك</div>
+        <div class="label" id="remainingLabel">المتبقي معك</div>
         <div class="big num" id="remaining">0</div>
-        <div class="row"><span>الميزانية</span><span class="num" id="budgetOut">0</span></div>
-        <div class="row"><span>صرفت</span><span class="num" id="spentOut">0</span></div>
+        <div id="pRows"></div>
       </div>
     </div>
     <div class="status ok" id="status">كل شيء تمام 👌</div>
@@ -357,13 +362,9 @@
   <h3>الإعدادات</h3>
   <h4>المصروف</h4>
   <div class="field">
-    <label>الميزانية (المبلغ اللي معك بالبداية)</label>
+    <label>المبلغ اللي بلشت فيه (أول شهر)</label>
     <input id="setBudget" inputmode="decimal" placeholder="100">
-  </div>
-  <div class="field">
-    <label>لازم يكفّي لغاية تاريخ (اختياري)</label>
-    <input id="setEnd" type="date">
-    <small>إذا حددته، بيحسب لك كم تقدر تصرف كل يوم وبينبهك إذا عم تصرف أسرع من اللازم.</small>
+    <small>كل شهر بيبلش باللي بقي معك من الشهر اللي قبله. لتزيد مصروفك استعمل زر "+ رصيد".</small>
   </div>
   <h4>الشهري</h4>
   <div class="field">
@@ -381,7 +382,7 @@
     <input id="setCur" placeholder="ليرة" maxlength="12">
   </div>
   <button class="btn primary" id="saveSettings">حفظ</button>
-  <button class="btn soft" id="newPeriod">بداية جديدة للمصروف (يمسح سجل المصروف فقط)</button>
+  <button class="btn soft" id="newPeriod">ابدأ المصروف من الصفر (يمسح كل سجل المصروف)</button>
   <div class="row2">
     <button class="btn soft" id="exportBtn">نسخة احتياطية</button>
     <button class="btn soft" id="importBtn">استرجاع</button>
@@ -535,7 +536,7 @@ const parseNum = v => {
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
 const dayKey = ts => new Date(ts).toDateString();
 const startOfDay = d => { const x = new Date(d); x.setHours(0, 0, 0, 0); return x; };
-const daysWord = n => n === 1 ? 'يوم' : n === 2 ? 'يومين' : n + ' أيام';
+const daysWord = n => n === 1 ? 'يوم' : n === 2 ? 'يومين' : n <= 10 ? n + ' أيام' : n + ' يوم';
 
 function esc(s) {
   return String(s || '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -587,29 +588,47 @@ function dueSubs() {
 }
 
 /* ---------- pocket money ---------- */
-function totals() {
-  let spent = 0, added = 0, today = 0;
-  const todayKey = dayKey(Date.now());
+// Pocket money runs month by month: each month opens with what was left at the end of the
+// previous one, starting from state.budget in the first month. Old entries are kept, just
+// shown under their own month.
+let pocketYM = ymOf(new Date());
+
+function pocketFirstYM() {
+  let first = ymOf(new Date(state.start));
+  for (const t of state.txs) { const m = monthOfTs(t.ts); if (m < first) first = m; }
+  return first;
+}
+
+function totals(ym = ymOf(new Date())) {
+  const byMonth = {};
   for (const t of state.txs) {
-    if (t.type === 'inc') added += t.amt;
-    else { spent += t.amt; if (dayKey(t.ts) === todayKey) today += t.amt; }
+    const m = byMonth[monthOfTs(t.ts)] ||= { inc: 0, exp: 0 };
+    if (t.type === 'inc') m.inc += t.amt; else m.exp += t.amt;
   }
-  const total = state.budget + added;
-  const remaining = total - spent;
-  const pct = total > 0 ? remaining / total : 0;
-  return { spent, added, total, remaining, pct, today };
+  const first = pocketFirstYM();
+  let opening = ym < first ? 0 : state.budget;
+  for (let m = first; m < ym; m = ymShift(m, 1)) {
+    const x = byMonth[m];
+    if (x) opening += x.inc - x.exp;
+  }
+  const cur = byMonth[ym] || { inc: 0, exp: 0 };
+  const todayKey = dayKey(Date.now());
+  const today = state.txs.filter(t => t.type !== 'inc' && dayKey(t.ts) === todayKey).reduce((a, t) => a + t.amt, 0);
+  const total = opening + cur.inc;
+  const remaining = total - cur.exp;
+  return { opening, added: cur.inc, spent: cur.exp, total, remaining, today,
+           pct: total > 0 ? remaining / total : 0, isFirst: ym === first, before: ym < first };
 }
 
 function plan(t) {
-  // daily allowance and pace, only when an end date is set
-  if (!state.endDate) return null;
-  const end = startOfDay(state.endDate + 'T00:00');
+  // daily allowance and pace for what's left of the current month
   const now = startOfDay(Date.now());
+  const end = new Date(now.getFullYear(), now.getMonth() + 1, 0);
   const daysLeft = Math.round((end - now) / 86400000) + 1; // including today
-  if (daysLeft <= 0) return { over: true };
   const spentBeforeToday = t.spent - t.today;
   const perDay = (t.total - spentBeforeToday) / daysLeft;
-  const startDay = startOfDay(state.start);
+  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+  const startDay = startOfDay(Math.max(monthStart.getTime(), state.start));
   const totalDays = Math.max(1, Math.round((end - startDay) / 86400000) + 1);
   const elapsed = Math.min(1, (totalDays - daysLeft + 1) / totalDays);
   const spentRatio = t.total > 0 ? t.spent / t.total : 0;
@@ -628,34 +647,44 @@ function paintStatus(id, level, msg) {
 }
 
 function renderPocket() {
-  const t = totals();
-  const p = plan(t);
+  const nowYM = ymOf(new Date());
+  const isNow = pocketYM === nowYM;
+  const t = totals(pocketYM);
+  const p = isNow ? plan(t) : null;
+  $('pMonthLabel').textContent = ymName(pocketYM) + (isNow ? ' (الحالي)' : '');
+  $('pNext').disabled = pocketYM >= nowYM;
+  $('pPrev').disabled = pocketYM <= pocketFirstYM();
   $('curLabel').textContent = state.currency;
+  $('remainingLabel').textContent = isNow ? 'المتبقي معك' : 'بقي معك آخر الشهر';
   $('remaining').textContent = money(t.remaining);
-  $('budgetOut').textContent = money(t.total);
-  $('spentOut').textContent = money(t.spent);
+  const [py, pm] = ymShift(pocketYM, -1).split('-').map(Number);
+  const prevName = new Date(py, pm - 1, 1).toLocaleDateString(LOC, { month: 'long' });
+  const rows = [[t.isFirst ? 'بلشت فيه' : 'من ' + prevName, money(t.opening)]];
+  if (t.added) rows.push(['أضفت', '+' + money(t.added)]);
+  rows.push(['صرفت', money(t.spent)]);
+  $('pRows').innerHTML = rows.map(r => '<div class="row"><span>' + r[0] + '</span><span class="num">' + r[1] + '</span></div>').join('');
   $('pct').textContent = Math.max(0, Math.round(t.pct * 100)) + '%';
 
   let level = 'ok', msg = 'كل شيء تمام 👌';
-  if (state.budget <= 0 && t.added <= 0) { level = 'warn'; msg = 'ابدأ بتحديد ميزانيتك من ⚙️'; }
-  else if (t.remaining < 0) { level = 'bad'; msg = '🚨 تجاوزت الميزانية بـ ' + money(-t.remaining); }
+  if (t.total <= 0 && !t.spent && isNow) { level = 'warn'; msg = 'ما معك رصيد. حدّد المبلغ من ⚙️ أو اضغط "+ رصيد"'; }
+  else if (t.remaining < 0) { level = 'bad'; msg = '🚨 تجاوزت اللي معك بـ ' + money(-t.remaining); }
+  else if (!isNow) { msg = 'انتقل ' + money(t.remaining) + ' لشهر ' + ymName(ymShift(pocketYM, 1)); }
   else if (t.pct <= CRITICAL) { level = 'bad'; msg = '🚨 خطر! باقي معك أقل من 10%'; }
-  else if (t.pct <= LOW) { level = 'warn'; msg = '⚠️ انتبه، باقي معك أقل من ربع الميزانية'; }
-  else if (p && !p.over && p.spentRatio > p.elapsed + 0.10) { level = 'warn'; msg = '⚠️ عم تصرف أسرع من اللازم'; }
+  else if (t.pct <= LOW) { level = 'warn'; msg = '⚠️ انتبه، باقي معك أقل من الربع'; }
+  else if (p.spentRatio > p.elapsed + 0.10) { level = 'warn'; msg = '⚠️ عم تصرف أسرع من اللازم'; }
   else if (t.pct <= 0.5) { msg = 'صرفت أكثر من النص، خفّف شوي 🙂'; }
   paintStatus('status', level, msg);
   paintRing('ringArc', t.pct, level);
 
   const alerts = [];
-  if (p && p.over) alerts.push('📅 انتهت المدة اللي حددتها. ابدأ فترة جديدة من الإعدادات.');
-  if (p && !p.over) {
+  if (p) {
     $('daily').hidden = false;
     $('perDay').textContent = money(Math.max(0, p.perDay));
     $('today').textContent = money(t.today);
     $('today').style.color = t.today > p.perDay ? 'var(--bad)' : '';
     if (t.today > p.perDay && p.perDay > 0) alerts.push('📈 صرفت اليوم أكثر من حصتك اليومية.');
-    if (p.spentRatio > p.elapsed + 0.10) alerts.push('🏃 عم تصرف أسرع من المخطط: صرفت ' + Math.round(p.spentRatio * 100) + '% ومرّ ' + Math.round(p.elapsed * 100) + '% من المدة.');
-    alerts.push('⏳ باقي ' + daysWord(p.daysLeft));
+    if (p.spentRatio > p.elapsed + 0.10) alerts.push('🏃 عم تصرف أسرع من المخطط: صرفت ' + Math.round(p.spentRatio * 100) + '% ومرّ ' + Math.round(p.elapsed * 100) + '% من الشهر.');
+    alerts.push('⏳ باقي ' + daysWord(p.daysLeft) + ' لآخر الشهر');
   } else {
     $('daily').hidden = true;
   }
@@ -676,7 +705,7 @@ function renderPocket() {
 
 function renderBreakdown(t) {
   const sums = {};
-  for (const x of state.txs) if (x.type !== 'inc') sums[x.cat] = (sums[x.cat] || 0) + x.amt;
+  for (const x of state.txs) if (x.type !== 'inc' && monthOfTs(x.ts) === pocketYM) sums[x.cat] = (sums[x.cat] || 0) + x.amt;
   const rows = Object.entries(sums).sort((a, b) => b[1] - a[1]);
   $('breakdownCard').hidden = rows.length < 1;
   if (!rows.length) return;
@@ -691,8 +720,8 @@ function renderBreakdown(t) {
 
 function renderList() {
   const list = $('list');
-  if (!state.txs.length) { list.innerHTML = '<div class="empty">ما في مصاريف لسا</div>'; return; }
-  const sorted = [...state.txs].sort((a, b) => b.ts - a.ts);
+  const sorted = state.txs.filter(t => monthOfTs(t.ts) === pocketYM).sort((a, b) => b.ts - a.ts);
+  if (!sorted.length) { list.innerHTML = '<div class="empty">ما في مصاريف بهالشهر لسا</div>'; return; }
   const todayKey = dayKey(Date.now());
   const yKey = dayKey(Date.now() - 86400000);
   let html = '', last = '';
@@ -1076,6 +1105,7 @@ function add(type) {
   if (!(amt > 0)) { toast('اكتب المبلغ أولاً', 'warn'); $('amount').focus(); return; }
   const custom = type === 'exp' && cat === 'custom' ? $('customCat').value.trim() : '';
   if (type === 'exp' && cat === 'custom' && !custom) { toast('اكتب على شو صرفت', 'warn'); $('customCat').focus(); return; }
+  pocketYM = ymOf(new Date());
   const before = totals();
   state.txs.push({ id: uid(), type, amt, note: $('note').value.trim(), cat: type === 'inc' ? '' : cat, label: custom, ts: Date.now() });
   save();
@@ -1157,7 +1187,9 @@ $('saveTx').onclick = () => {
   toast('تم التعديل ✓');
 };
 $('delTx').onclick = () => { const t = editTx; closeSheet(); deleteTx(t); };
-$('dueBanner').onclick = () => { viewYM = ymOf(new Date()); setTab('month'); };
+$('pPrev').onclick = () => { pocketYM = ymShift(pocketYM, -1); renderPocket(); };
+$('pNext').onclick = () => { pocketYM = ymShift(pocketYM, 1); renderPocket(); };
+$('dueBanner').onclick =() => { viewYM = ymOf(new Date()); setTab('month'); };
 
 /* ---------- monthly actions ---------- */
 $('prevMonth').onclick = () => { viewYM = ymShift(viewYM, -1); editingSalary = false; renderMonth(); };
@@ -1277,7 +1309,6 @@ $('deleteSub').onclick = () => {
 $('openSettings').onclick = () => {
   $('setBudget').value = state.budget || '';
   $('setCur').value = state.currency;
-  $('setEnd').value = state.endDate || '';
   $('setGoal').value = state.saveGoal || '';
   $('setLink').checked = !!state.linkPocket;
   openSheet($('settingsSheet'));
@@ -1291,16 +1322,15 @@ $('saveSettings').onclick = () => {
   state.saveGoal = g;
   state.linkPocket = $('setLink').checked;
   state.currency = $('setCur').value.trim() || 'ليرة';
-  state.endDate = $('setEnd').value;
   save(); render(); closeSheet();
   toast('تم الحفظ ✓');
 };
 $('newPeriod').onclick = () => {
-  if (!confirm('بدك تمسح سجل المصروف وتبدأ من جديد؟ (الراتب والاشتراكات ما بيتأثروا)')) return;
+  if (!confirm('بدك تمسح كل سجل المصروف (كل الأشهر) وتبدأ من جديد؟ الراتب والاشتراكات والأهداف ما بيتأثروا.')) return;
   const b = parseNum($('setBudget').value);
   if (b >= 0) state.budget = b;
   state.txs = []; state.start = Date.now();
-  state.endDate = $('setEnd').value;
+  pocketYM = ymOf(new Date());
   save(); render(); closeSheet();
   toast('بداية جديدة 🎉');
 };
@@ -1350,6 +1380,17 @@ if (params.has('add')) tab = 'pocket';
 if (params.has('month')) tab = 'month';
 render();
 if (params.has('add')) $('amount').focus();
+
+// first open in a new month: say what carried over
+(function monthRollover() {
+  const nowYM = ymOf(new Date());
+  const last = state.lastSeenYM || (state.txs.length ? monthOfTs(Math.max(...state.txs.map(t => t.ts))) : null);
+  state.lastSeenYM = nowYM;
+  save();
+  if (!last || last >= nowYM || !state.txs.length) return;
+  const carried = totals(nowYM).opening;
+  setTimeout(() => toast('🗓️ أهلاً بـ' + ymName(nowYM) + '! انتقل معك ' + money(carried) + ' من الشهر الماضي'), 500);
+})();
 if (!state.budget && !state.txs.length && !state.subs.length && !Object.keys(state.months).length) setTimeout(() => $('openSettings').click(), 300);
 
 if ('serviceWorker' in navigator && location.protocol === 'https:') {
