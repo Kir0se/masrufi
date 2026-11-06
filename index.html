@@ -115,7 +115,14 @@
   .month-nav button:disabled { opacity: .35; }
   .salary-show { display: flex; align-items: center; justify-content: space-between; }
   .salary-show b { font-size: 26px; }
-  .salary-form { display: grid; grid-template-columns: 1fr auto; gap: 8px; }
+  .salary-form { display: grid; grid-template-columns: 1fr auto auto; gap: 8px; }
+  .cur-btn { border: 0; background: var(--chip); border-radius: 12px; padding: 0 12px; min-width: 52px; font-weight: 700; font-size: 15px; cursor: pointer; color: var(--accent); }
+  .cur-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 14px; }
+  .cur-row .seg { flex: none; min-width: 150px; }
+  .seg.small button { padding: 7px 10px; font-size: 14px; }
+  .rate-btn { border: 0; background: none; color: var(--muted); font-size: 13px; cursor: pointer; padding: 4px 0; text-align: start; }
+  .rate-btn b { color: var(--accent); }
+  .amt small { display: block; font-size: 11px; color: var(--muted); font-weight: 500; text-align: left; }
   .salary-form input, .inline-add input { border: 0; background: var(--chip); border-radius: 12px; padding: 12px; outline: none; font-size: 16px; min-width: 0; }
   .hint { font-size: 12px; color: var(--muted); margin-top: 8px; }
   .sub { display: flex; align-items: center; gap: 12px; padding: 10px 0; border-top: 1px solid var(--line); cursor: pointer; }
@@ -275,6 +282,14 @@
     <button id="nextMonth" aria-label="الشهر التالي">‹</button>
   </div>
 
+  <div class="cur-row">
+    <button class="rate-btn" id="rateBtn"></button>
+    <div class="seg small" id="mCurSeg">
+      <button data-v="L" id="mCurL">ليرة</button>
+      <button data-v="USD">$ دولار</button>
+    </div>
+  </div>
+
   <section class="card">
     <div class="summary">
       <div class="ring">
@@ -300,6 +315,7 @@
     <div id="salaryFormWrap">
       <div class="salary-form">
         <input id="salaryIn" inputmode="decimal" placeholder="كم الراتب؟">
+        <button class="cur-btn" id="salaryCur" data-cur="L" aria-label="العملة"></button>
         <button class="btn primary small" id="saveSalary">سجّل</button>
       </div>
       <div class="chips" id="salaryQuick"></div>
@@ -316,9 +332,10 @@
   <section class="card">
     <div class="card-head"><h3>🧾 مصاريف ثانية لهالشهر</h3></div>
     <div id="itemList"></div>
-    <div class="inline-add">
+    <div class="inline-add" style="grid-template-columns: 1fr 86px auto auto">
       <input id="itemName" placeholder="مثلاً: إيجار، فاتورة" maxlength="30">
       <input id="itemAmt" inputmode="decimal" placeholder="المبلغ">
+      <button class="cur-btn" id="itemCur" data-cur="L" aria-label="العملة"></button>
       <button class="btn primary small" id="addItem">+</button>
     </div>
   </section>
@@ -400,7 +417,10 @@
   </div>
   <div class="field">
     <label>المبلغ</label>
-    <input id="subAmt" inputmode="decimal" placeholder="0">
+    <div class="salary-form" style="grid-template-columns: 1fr auto">
+      <input id="subAmt" inputmode="decimal" placeholder="0" style="background:var(--card)">
+      <button class="cur-btn" id="subCur" data-cur="L" aria-label="العملة" style="background:var(--card)"></button>
+    </div>
   </div>
   <div class="field">
     <label>الأيقونة</label>
@@ -561,19 +581,52 @@ function dueDate(s, ym) {
 }
 function monthlyCost(s) { return s.cycle === 'y' ? s.amt / 12 : s.amt; }
 
-function monthTotals(ym) {
+/* ---------- currencies ----------
+   Salary, subscriptions and monthly costs each carry their own currency: 'L' (the local
+   currency, named in settings) or 'USD'. Totals are converted with the dollar rate of that
+   month, so changing the rate later doesn't rewrite past months. */
+const curLabel = c => c === 'USD' ? '$' : state.currency;
+const fmtC = (n, c) => c === 'USD' ? '$' + fmt(n) : money(n);
+function rateFor(ym) {
+  const own = state.months[ym] && state.months[ym].rate;
+  if (own) return own;
+  const keys = Object.keys(state.months).filter(k => state.months[k].rate).sort();
+  const before = keys.filter(k => k < ym).pop();
+  if (before) return state.months[before].rate;
+  return keys.length ? state.months[keys[0]].rate : 0;
+}
+function conv(amt, from, to, rate) {
+  from = from || 'L';
+  if (from === to) return amt;
+  if (!rate) return 0;
+  return from === 'USD' ? amt * rate : amt / rate;
+}
+// currency the monthly tab shows totals in: the user's pick, else the salary's currency
+function dispCur() {
+  return state.mCur || monthData(viewYM).salaryCur || 'L';
+}
+function usesUSD() {
+  return state.subs.some(s => s.cur === 'USD')
+    || Object.values(state.months).some(md => md.salaryCur === 'USD' || md.items.some(i => i.cur === 'USD'));
+}
+
+function monthTotals(ym, to = dispCur()) {
   const md = monthData(ym);
   const subs = subsFor(ym);
-  const salary = md.salary || 0;
-  const subsTotal = subs.reduce((a, s) => a + s.amt, 0);
-  const paidTotal = subs.filter(s => md.paid[s.id]).reduce((a, s) => a + s.amt, 0);
-  const itemsTotal = md.items.reduce((a, i) => a + i.amt, 0);
+  const rate = rateFor(ym);
+  let needsRate = false;
+  const cv = (a, c) => { if ((c || 'L') !== to && !rate) needsRate = true; return conv(a, c, to, rate); };
+  const salary = cv(md.salary || 0, md.salaryCur);
+  const subsTotal = subs.reduce((a, s) => a + cv(s.amt, s.cur), 0);
+  const paidTotal = subs.filter(s => md.paid[s.id]).reduce((a, s) => a + cv(s.amt, s.cur), 0);
+  const itemsTotal = md.items.reduce((a, i) => a + cv(i.amt, i.cur), 0);
   const pocket = state.linkPocket
-    ? state.txs.filter(t => t.type !== 'inc' && monthOfTs(t.ts) === ym).reduce((a, t) => a + t.amt, 0) : 0;
+    ? cv(state.txs.filter(t => t.type !== 'inc' && monthOfTs(t.ts) === ym).reduce((a, t) => a + t.amt, 0), 'L') : 0;
   const spent = subsTotal + itemsTotal + pocket;
   const remaining = salary - spent;
   return { md, subs, salary, hasSalary: md.salary != null, subsTotal, paidTotal, itemsTotal, pocket, spent,
-           remaining, pct: salary > 0 ? remaining / salary : 0, goal: salary * (state.saveGoal || 0) / 100 };
+           remaining, pct: salary > 0 ? remaining / salary : 0, goal: salary * (state.saveGoal || 0) / 100,
+           cur: to, rate, needsRate };
 }
 
 // unpaid subscriptions in the current month that are due soon or overdue
@@ -695,7 +748,7 @@ function renderPocket() {
   if (due.length) {
     const d = due[0];
     const when = d.diff < 0 ? 'متأخر ' + daysWord(-d.diff) : d.diff === 0 ? 'مستحق اليوم' : 'بعد ' + daysWord(d.diff);
-    $('dueBanner').textContent = '📅 ' + d.s.name + ' (' + money(d.s.amt) + ') ' + when
+    $('dueBanner').textContent = '📅 ' + d.s.name + ' (' + fmtC(d.s.amt, d.s.cur) + ') ' + when
       + (due.length > 1 ? ' · و' + (due.length - 1) + ' غيره' : '') + ' ←';
   }
 
@@ -754,27 +807,40 @@ function renderMonth() {
   const m = monthTotals(viewYM);
   $('monthLabel').textContent = ymName(viewYM) + (viewYM === nowYM ? ' (الحالي)' : '');
   $('nextMonth').disabled = viewYM >= ymShift(nowYM, 1);
+  const C = n => fmtC(n, m.cur);
+
+  // currency + rate bar
+  $('mCurL').textContent = state.currency;
+  document.querySelectorAll('#mCurSeg button').forEach(b => b.classList.toggle('on', b.dataset.v === m.cur));
+  $('rateBtn').innerHTML = m.rate
+    ? '💱 سعر الدولار: <b class="num">' + fmt(m.rate) + '</b> ' + esc(state.currency) + ' · تعديل'
+    : '💱 <b>حط سعر الدولار</b>';
 
   // summary
-  $('mRemaining').textContent = m.hasSalary ? money(m.remaining) : '—';
+  $('mRemaining').textContent = m.hasSalary ? C(m.remaining) : '—';
   $('mPct').textContent = m.hasSalary ? Math.round(m.pct * 100) + '%' : '—';
-  const rows = [['الراتب', m.hasSalary ? money(m.salary) : '—'], ['الاشتراكات', money(m.subsTotal)]];
-  if (m.itemsTotal) rows.push(['مصاريف ثانية', money(m.itemsTotal)]);
-  if (state.linkPocket) rows.push(['المصروف', money(m.pocket)]);
+  const rows = [['الراتب', m.hasSalary ? C(m.salary) : '—'], ['الاشتراكات', C(m.subsTotal)]];
+  if (m.itemsTotal) rows.push(['مصاريف ثانية', C(m.itemsTotal)]);
+  if (state.linkPocket) rows.push(['المصروف', C(m.pocket)]);
   $('mRows').innerHTML = rows.map(r => '<div class="row"><span>' + r[0] + '</span><span class="num">' + r[1] + '</span></div>').join('');
 
   let level = 'ok', msg;
-  if (!m.hasSalary) { level = 'warn'; msg = 'سجّل راتب هالشهر لتعرف كم بيبقى معك 👇'; }
-  else if (m.remaining < 0) { level = 'bad'; msg = '🚨 مصاريف الشهر أكثر من الراتب بـ ' + money(-m.remaining); }
+  if (m.needsRate) { level = 'warn'; msg = '💱 في مبالغ بالدولار وبالليرة. حط سعر الدولار فوق لتنحسب صح'; }
+  else if (!m.hasSalary) { level = 'warn'; msg = 'سجّل راتب هالشهر لتعرف كم بيبقى معك 👇'; }
+  else if (m.remaining < 0) { level = 'bad'; msg = '🚨 مصاريف الشهر أكثر من الراتب بـ ' + C(-m.remaining); }
   else if (m.pct <= CRITICAL) { level = 'bad'; msg = '🚨 ما رح يبقى معك تقريباً شيء من الراتب'; }
-  else if (m.goal > 0 && m.remaining < m.goal) { level = 'warn'; msg = '⚠️ أقل من هدف الادخار (' + money(m.goal) + ')'; }
+  else if (m.goal > 0 && m.remaining < m.goal) { level = 'warn'; msg = '⚠️ أقل من هدف الادخار (' + C(m.goal) + ')'; }
   else if (m.pct <= LOW) { level = 'warn'; msg = '⚠️ بيبقى معك أقل من ربع الراتب'; }
-  else msg = 'ممتاز، رح يبقى معك ' + money(m.remaining) + ' 👌';
+  else msg = 'ممتاز، رح يبقى معك ' + C(m.remaining) + ' 👌';
   paintStatus('mStatus', level, msg);
   paintRing('mRingArc', m.hasSalary ? m.pct : 0, level);
 
   const alerts = [];
-  if (m.subs.length) alerts.push('✅ دفعت ' + m.subs.filter(s => m.md.paid[s.id]).length + ' من ' + m.subs.length + ' اشتراكات (' + money(m.paidTotal) + ' من ' + money(m.subsTotal) + ')');
+  if (m.hasSalary && m.rate && usesUSD()) {
+    const other = m.cur === 'USD' ? 'L' : 'USD';
+    alerts.push('💱 بيبقى معك تقريباً ' + fmtC(conv(m.remaining, m.cur, other, m.rate), other));
+  }
+  if (m.subs.length) alerts.push('✅ دفعت ' + m.subs.filter(s => m.md.paid[s.id]).length + ' من ' + m.subs.length + ' اشتراكات (' + C(m.paidTotal) + ' من ' + C(m.subsTotal) + ')');
   if (m.hasSalary && m.salary > 0 && m.subsTotal / m.salary > SUBS_HEAVY)
     alerts.push('💸 الاشتراكات لحالها ' + Math.round(m.subsTotal / m.salary * 100) + '% من راتبك. شوف إذا في شي ما بتستعمله.');
   if (m.goal > 0 && m.hasSalary && m.remaining >= m.goal) alerts.push('🎯 حققت هدف الادخار (' + state.saveGoal + '%)');
@@ -795,10 +861,12 @@ function pocketByCat(ym) {
   for (const t of state.txs) if (t.type !== 'inc' && monthOfTs(t.ts) === ym) out[t.cat] = (out[t.cat] || 0) + t.amt;
   return out;
 }
-// everything that went out in a month: subscriptions, one-off costs and pocket spending
+// everything that went out in a month (subscriptions, one-off costs and pocket spending),
+// in the monthly tab's display currency
 function allOut(ym) {
   const m = monthTotals(ym);
-  return m.subsTotal + m.itemsTotal + Object.values(pocketByCat(ym)).reduce((a, v) => a + v, 0);
+  const pocket = Object.values(pocketByCat(ym)).reduce((a, v) => a + v, 0);
+  return m.subsTotal + m.itemsTotal + conv(pocket, 'L', m.cur, m.rate);
 }
 function deltaHtml(cur, prev) {
   if (!prev) return cur ? '<span class="same">جديد</span>' : '<span class="same">—</span>';
@@ -807,6 +875,8 @@ function deltaHtml(cur, prev) {
   return d > 0 ? '<span class="up">↑ ' + d + '%</span>' : '<span class="down">↓ ' + (-d) + '%</span>';
 }
 function renderCompare() {
+  const dc = dispCur(), rNow = rateFor(viewYM), rPrev = rateFor(ymShift(viewYM, -1));
+  const money = n => fmtC(n, dc);   // shadow: every amount in this card is in the display currency
   const months = Array.from({ length: 6 }, (_, i) => ymShift(viewYM, i - 5));
   const vals = months.map(allOut);
   const withData = vals.filter(v => v > 0).length;
@@ -828,7 +898,8 @@ function renderCompare() {
   rows.push('<div class="cmp"><span>🔁 الاشتراكات</span><span><span class="num">' + money(a.subsTotal) + '</span> ' + deltaHtml(a.subsTotal, b.subsTotal) + '</span></div>');
   if (a.itemsTotal || b.itemsTotal)
     rows.push('<div class="cmp"><span>🧾 مصاريف ثانية</span><span><span class="num">' + money(a.itemsTotal) + '</span> ' + deltaHtml(a.itemsTotal, b.itemsTotal) + '</span></div>');
-  const pc = pocketByCat(viewYM), pp = pocketByCat(prevYM);
+  const toDc = (o, r) => { for (const k in o) o[k] = conv(o[k], 'L', dc, r); return o; };
+  const pc = toDc(pocketByCat(viewYM), rNow), pp = toDc(pocketByCat(prevYM), rPrev);
   const cats = [...new Set([...Object.keys(pc), ...Object.keys(pp)])].sort((x, y) => (pc[y] || 0) - (pc[x] || 0));
   for (const id of cats) {
     const c = CATS.find(x => x.id === id) || CATS[CATS.length - 1];
@@ -961,12 +1032,16 @@ function renderSalary(m) {
   $('salaryShow').hidden = !show;
   $('editSalary').hidden = !show;
   $('salaryFormWrap').hidden = show;
-  $('salaryOut').textContent = money(m.salary);
-  $('salaryIn').value = editingSalary && m.hasSalary ? m.salary : '';
+  const own = m.md.salaryCur || 'L';
+  $('salaryOut').innerHTML = fmtC(m.md.salary || 0, own)
+    + (own !== m.cur && m.rate ? ' <small style="font-size:14px;color:var(--muted);font-weight:500">≈ ' + fmtC(m.salary, m.cur) + '</small>' : '');
+  $('salaryIn').value = editingSalary && m.hasSalary ? m.md.salary : '';
   // offer last recorded salary as a one-tap fill
   const prev = Object.keys(state.months).filter(k => k < viewYM && state.months[k].salary != null).sort().pop();
+  const pmd = prev && state.months[prev];
+  if (!editingSalary || !m.hasSalary) setCurBtn($('salaryCur'), m.hasSalary ? own : pmd ? pmd.salaryCur || 'L' : 'L');
   $('salaryQuick').innerHTML = prev
-    ? '<button class="chip" data-v="' + state.months[prev].salary + '">نفس راتب ' + ymName(prev) + ': ' + money(state.months[prev].salary) + '</button>' : '';
+    ? '<button class="chip" data-v="' + pmd.salary + '" data-c="' + (pmd.salaryCur || 'L') + '">نفس راتب ' + ymName(prev) + ': ' + fmtC(pmd.salary, pmd.salaryCur) + '</button>' : '';
 }
 
 function subStatus(s, m, nowYM) {
@@ -992,7 +1067,7 @@ function renderSubs(m, nowYM) {
       + '<button class="check ' + (m.md.paid[s.id] ? 'on' : '') + '" data-pay="' + s.id + '" aria-label="مدفوع">' + (m.md.paid[s.id] ? '✓' : '') + '</button>'
       + '<div class="emo">' + s.emo + '</div>'
       + '<div class="info"><b>' + esc(s.name) + '</b><span class="' + cls + '">' + (s.cycle === 'y' ? 'سنوي · ' : '') + txt + '</span></div>'
-      + '<div class="amt num">' + fmt(s.amt) + '</div></div>';
+      + amtHtml(s.amt, s.cur, m) + '</div>';
   }).join('');
   html += others.map(s => {
     const stopped = s.until && s.until < viewYM;
@@ -1000,22 +1075,30 @@ function renderSubs(m, nowYM) {
     return '<div class="sub ' + (stopped ? 'stopped' : '') + '" data-id="' + s.id + '" style="opacity:.55">'
       + '<div class="emo">' + s.emo + '</div>'
       + '<div class="info"><b>' + esc(s.name) + '</b><span>' + why + '</span></div>'
-      + '<div class="amt num">' + fmt(s.amt) + '</div></div>';
+      + '<div class="amt num">' + fmtC(s.amt, s.cur) + '</div></div>';
   }).join('');
   $('subList').innerHTML = html || '<div class="empty">ما في اشتراكات. اضغط "+ إضافة"</div>';
 
   const live = state.subs.filter(s => !s.until || s.until >= nowYM);
   $('subFoot').hidden = !live.length;
-  const perMonth = live.reduce((a, s) => a + monthlyCost(s), 0);
-  $('subFoot').innerHTML = '<span>بالشهر تقريباً: <b class="num">' + money(perMonth) + '</b></span>'
-    + '<span>بالسنة: <b class="num">' + money(perMonth * 12) + '</b></span>';
+  const r = rateFor(nowYM);
+  const perMonth = live.reduce((a, s) => a + conv(monthlyCost(s), s.cur, m.cur, r), 0);
+  $('subFoot').innerHTML = '<span>بالشهر تقريباً: <b class="num">' + fmtC(perMonth, m.cur) + '</b></span>'
+    + '<span>بالسنة: <b class="num">' + fmtC(perMonth * 12, m.cur) + '</b></span>';
+}
+
+// an amount in its own currency, plus its value in the display currency when they differ
+function amtHtml(amt, cur, m) {
+  cur = cur || 'L';
+  const alt = cur !== m.cur && m.rate ? '<small>≈ ' + fmtC(conv(amt, cur, m.cur, m.rate), m.cur) + '</small>' : '';
+  return '<div class="amt num">' + fmtC(amt, cur) + alt + '</div>';
 }
 
 function renderItems(m) {
   $('itemList').innerHTML = m.md.items.map(i =>
     '<div class="sub" style="cursor:default"><div class="emo">🧾</div>'
     + '<div class="info"><b>' + esc(i.name) + '</b></div>'
-    + '<div class="amt num">' + fmt(i.amt) + '</div>'
+    + amtHtml(i.amt, i.cur, m)
     + '<button class="del tx-del" data-item="' + i.id + '" aria-label="حذف" style="border:0;background:none;color:var(--muted);font-size:18px;cursor:pointer">✕</button></div>'
   ).join('');
 }
@@ -1025,13 +1108,14 @@ function renderHistory(nowYM) {
   $('histCard').hidden = !past.length;
   if (!past.length) return;
   let saved = 0;
+  const dc = dispCur();
   $('histList').innerHTML = past.slice(0, 12).map(k => {
-    const r = monthTotals(k).remaining;
-    return '<div class="hist" data-ym="' + k + '"><span>' + ymName(k) + '</span><span class="num ' + (r >= 0 ? 'pos' : 'neg') + '">' + (r >= 0 ? '+' : '−') + money(Math.abs(r)) + '</span></div>';
+    const r = monthTotals(k, dc).remaining;
+    return '<div class="hist" data-ym="' + k + '"><span>' + ymName(k) + '</span><span class="num ' + (r >= 0 ? 'pos' : 'neg') + '">' + (r >= 0 ? '+' : '−') + fmtC(Math.abs(r), dc) + '</span></div>';
   }).join('');
-  for (const k of past) saved += monthTotals(k).remaining;
+  for (const k of past) saved += monthTotals(k, dc).remaining;
   const avg = saved / past.length;
-  $('histFoot').innerHTML = '<span>مجموع اللي بقي: <b class="num">' + money(saved) + '</b></span><span>المعدل بالشهر: <b class="num">' + money(avg) + '</b></span>';
+  $('histFoot').innerHTML = '<span>مجموع اللي بقي: <b class="num">' + fmtC(saved, dc) + '</b></span><span>المعدل بالشهر: <b class="num">' + fmtC(avg, dc) + '</b></span>';
 }
 
 /* ---------- general ---------- */
@@ -1195,16 +1279,44 @@ $('dueBanner').onclick =() => { viewYM = ymOf(new Date()); setTab('month'); };
 $('prevMonth').onclick = () => { viewYM = ymShift(viewYM, -1); editingSalary = false; renderMonth(); };
 $('nextMonth').onclick = () => { viewYM = ymShift(viewYM, 1); editingSalary = false; renderMonth(); };
 
-function setSalary(v) {
+// currency toggle buttons next to amount inputs
+function setCurBtn(b, c) { b.dataset.cur = c; b.textContent = curLabel(c); }
+['salaryCur', 'itemCur', 'subCur'].forEach(id => $(id).addEventListener('click', e => {
+  e.preventDefault();
+  setCurBtn($(id), $(id).dataset.cur === 'USD' ? 'L' : 'USD');
+}));
+setCurBtn($('itemCur'), 'L');
+
+$('mCurSeg').addEventListener('click', e => {
+  const b = e.target.closest('button');
+  if (!b) return;
+  state.mCur = b.dataset.v;
+  save(); renderMonth();
+});
+$('rateBtn').onclick = () => {
+  const cur = rateFor(viewYM);
+  const v = prompt('كم ' + state.currency + ' بيساوي الدولار الواحد بـ' + ymName(viewYM) + '؟', cur || '');
+  if (v === null) return;
+  const r = parseNum(v);
+  if (!(r > 0)) return toast('اكتب السعر كرقم', 'warn');
+  ensureMonth(viewYM).rate = r;
+  save(); renderMonth();
+  toast('💱 سعر ' + ymName(viewYM) + ': 1$ = ' + fmt(r) + ' ' + state.currency);
+};
+
+function setSalary(v, c = $('salaryCur').dataset.cur) {
   if (!(v >= 0)) return toast('اكتب الراتب كرقم', 'warn');
-  ensureMonth(viewYM).salary = v;
+  const md = ensureMonth(viewYM);
+  md.salary = v;
+  md.salaryCur = c;
   editingSalary = false;
   save(); renderMonth();
   toast('تم تسجيل راتب ' + ymName(viewYM) + ' ✓');
+  if (c === 'USD' && !rateFor(viewYM)) setTimeout(() => $('rateBtn').click(), 400);
 }
 $('saveSalary').onclick = () => setSalary(parseNum($('salaryIn').value));
 $('salaryIn').addEventListener('keydown', e => { if (e.key === 'Enter') setSalary(parseNum($('salaryIn').value)); });
-$('salaryQuick').addEventListener('click', e => { const b = e.target.closest('.chip'); if (b) setSalary(+b.dataset.v); });
+$('salaryQuick').addEventListener('click', e => { const b = e.target.closest('.chip'); if (b) setSalary(+b.dataset.v, b.dataset.c); });
 $('editSalary').onclick = () => { editingSalary = true; renderMonth(); $('salaryIn').focus(); };
 
 $('subList').addEventListener('click', e => {
@@ -1225,7 +1337,7 @@ function addItem() {
   const amt = parseNum($('itemAmt').value);
   if (!name) { toast('اكتب اسم المصروف', 'warn'); $('itemName').focus(); return; }
   if (!(amt > 0)) { toast('اكتب المبلغ', 'warn'); $('itemAmt').focus(); return; }
-  ensureMonth(viewYM).items.push({ id: uid(), name, amt });
+  ensureMonth(viewYM).items.push({ id: uid(), name, amt, cur: $('itemCur').dataset.cur });
   $('itemName').value = ''; $('itemAmt').value = '';
   save(); renderMonth();
 }
@@ -1261,6 +1373,7 @@ function openSub(s) {
   $('subTitle').textContent = s ? 'تعديل الاشتراك' : 'اشتراك جديد';
   $('subName').value = s ? s.name : '';
   $('subAmt').value = s ? s.amt : '';
+  setCurBtn($('subCur'), s ? s.cur || 'L' : 'L');
   $('subDay').value = s ? s.day : new Date().getDate();
   $('subMonth').value = s && s.month ? s.month : new Date().getMonth() + 1;
   subEmo = s ? s.emo : SUB_EMOS[0];
@@ -1278,7 +1391,7 @@ $('saveSub').onclick = () => {
   const day = Math.min(31, Math.max(1, parseInt(parseNum($('subDay').value)) || 1));
   if (!name) return toast('اكتب اسم الاشتراك', 'warn');
   if (!(amt > 0)) return toast('اكتب المبلغ', 'warn');
-  const data = { name, amt, day, emo: subEmo, cycle: subCycle, month: subCycle === 'y' ? +$('subMonth').value : null };
+  const data = { name, amt, cur: $('subCur').dataset.cur, day, emo: subEmo, cycle: subCycle, month: subCycle === 'y' ? +$('subMonth').value : null };
   if (editSub) Object.assign(editSub, data);
   else state.subs.push(Object.assign({ id: uid(), from: viewYM, until: null }, data));
   save(); closeSheet(); renderMonth();
